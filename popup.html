@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ETA eInvoicing Exporter</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { font: 13px/1.45 "Segoe UI", Tahoma, sans-serif; width: 400px; margin: 0; padding: 12px; background: #f6f7f9; color: #1c2b36; }
+    h1 { font-size: 15px; margin: 0 0 2px; }
+    .sub { color: #61707d; font-size: 11.5px; margin-bottom: 10px; }
+    .card { background: #fff; border: 1px solid #e2e6ea; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    label { font-size: 11.5px; color: #4a5a66; display: block; margin-bottom: 2px; }
+    input, select { width: 100%; padding: 5px 7px; border: 1px solid #cfd7dd; border-radius: 5px; font: inherit; background: #fff; }
+    input:focus, select:focus { outline: 2px solid #9ec5fe; border-color: #5a9cf8; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    button { flex: 1 1 auto; padding: 7px 10px; border: 0; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
+    #start { background: #0b7a3b; color: #fff; }
+    #pause { background: #b98700; color: #fff; }
+    #cancel { background: #b3372e; color: #fff; }
+    #exportXlsx { background: #217346; color: #fff; }
+    #exportCsv { background: #456f8c; color: #fff; }
+    #pdfs { background: #5a5aa8; color: #fff; }
+    .ghost { background: #eef1f4 !important; color: #40525f !important; flex: 0 0 auto; }
+    #bar { height: 8px; background: #e6eaee; border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
+    #barIn { height: 100%; width: 0%; background: linear-gradient(90deg,#0b7a3b,#28a745); transition: width .3s; }
+    #status { font-size: 12px; color: #33454f; }
+    #status b { color: #0b7a3b; }
+    .err { color: #b3372e; font-size: 12px; white-space: pre-wrap; margin-top: 6px; }
+    .ok-note { color: #0b7a3b; }
+    #log { max-height: 110px; overflow-y: auto; font: 11px/1.5 Consolas, monospace; color: #51626e; background: #f2f4f6; border-radius: 6px; padding: 6px; margin-top: 8px; }
+    .hint { font-size: 11px; color: #7b8892; margin-top: 6px; }
+    .session { display: flex; gap: 10px; font-size: 11.5px; margin-bottom: 4px; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #c33; margin-right: 4px; }
+    .dot.on { background: #23a55a; }
+    .wide { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+  <h1>ETA eInvoicing — Bulk Export (Direct API)</h1>
+  <div class="sub">Downloads invoices + full details from invoicing.eta.gov.eg via its internal API — same layout as your reference Excel.</div>
+
+  <div class="card">
+    <div class="session">
+      <span><span class="dot" id="dotTab"></span>Portal tab</span>
+      <span><span class="dot" id="dotAuth"></span>Auth token</span>
+      <span><span class="dot" id="dotData"></span>Data collected</span>
+    </div>
+    <div class="grid">
+      <div><label>From (submission date)</label><input type="date" id="from" /></div>
+      <div><label>To</label><input type="date" id="to" /></div>
+      <div><label>Date field</label>
+        <select id="dateField">
+          <option value="Submission">Submission (تاريخ التقديم)</option>
+          <option value="Issue">Issue (تاريخ الإصدار)</option>
+        </select>
+      </div>
+      <div><label>Direction</label>
+        <select id="direction">
+          <option value="Received">Received (وارد)</option>
+          <option value="Sent">Sent (صادر)</option>
+          <option value="Both">Both</option>
+        </select>
+      </div>
+      <div><label>Status</label>
+        <select id="status">
+          <option>All</option><option>Valid</option><option>Invalid</option>
+          <option>Rejected</option><option>Cancelled</option><option>Submitted</option>
+        </select>
+      </div>
+      <div><label>Document type</label>
+        <select id="docType">
+          <option value="All">All</option>
+          <option value="i">فاتورة (invoice)</option>
+          <option value="c">إشعار دائن (credit)</option>
+          <option value="d">إشعار مدين (debit)</option>
+        </select>
+      </div>
+      <div><label>Page size</label><input type="number" id="pageSize" value="100" min="10" max="100" /></div>
+      <div><label>Detail workers</label><input type="number" id="concurrency" value="6" min="1" max="12" /></div>
+      <div><label>Date window (days)</label><input type="number" id="windowDays" value="30" min="1" max="365" /></div>
+      <div><label>Max documents (0 = all)</label><input type="number" id="maxDocs" value="0" min="0" /></div>
+      <div class="wide"><label><input type="checkbox" id="includeDetails" checked style="width:auto" /> Fetch full details per invoice (line items, taxes, addresses — needed for both sheets)</label></div>
+    </div>
+    <div class="btns">
+      <button id="start">Start export</button>
+      <button id="pause" disabled>Pause</button>
+      <button id="cancel" disabled>Cancel</button>
+    </div>
+    <div class="btns">
+      <button id="resume" style="display:none">Resume</button>
+      <button id="exportXlsx" disabled>Export .xlsx</button>
+      <button id="exportCsv" disabled>Export CSV</button>
+      <button id="pdfs" disabled>Download PDFs…</button>
+    </div>
+    <div class="btns">
+      <button id="check" class="ghost">Check connection</button>
+      <button id="clear" class="ghost">Clear stored data</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="bar"><div id="barIn"></div></div>
+    <div id="status">Idle.</div>
+    <div class="err" id="err"></div>
+    <div id="log"></div>
+    <div class="hint">Keep the portal tab open while exporting. Progress survives page refreshes via Resume. PDFs are fetched through the portal page and saved under <b>ETA_PDFs/</b> in your Downloads folder.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

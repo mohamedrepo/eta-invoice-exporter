@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>ETA Export — Building file…</title>
+  <style>
+    body { font: 13px/1.5 "Segoe UI", Tahoma, sans-serif; padding: 18px; color: #1c2b36; }
+    h2 { margin: 0 0 8px; font-size: 15px; }
+    #msg { margin: 10px 0; color: #4a5a66; white-space: pre-wrap; }
+    .done { color: #0b7a3b; font-weight: 600; }
+    .bad { color: #b3372e; }
+    button { margin-top: 12px; padding: 7px 14px; border: 0; border-radius: 6px; background: #0b7a3b; color: #fff; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h2 id="title">ETA Export</h2>
+  <div id="msg">Preparing…</div>
+  <button id="close">Close</button>
+  <script src="vendor/exceljs.min.js"></script>
+  <script src="mapping.js"></script>
+  <script src="export.js"></script>
+</body>
+</html>

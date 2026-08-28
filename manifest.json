@@ -1,0 +1,32 @@
+﻿{
+  "manifest_version": 3,
+  "name": "ETA eInvoicing Bulk Exporter (Direct API)",
+  "version": "1.1.0",
+  "description": "Bulk-downloads all invoices and full details from the Egyptian Tax Authority e-invoicing portal (invoicing.eta.gov.eg) using its internal API directly — fast, reliable, and exports to the same Excel layout as the reference file.",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "unlimitedStorage", "downloads", "scripting", "tabs"],
+  "host_permissions": [
+    "https://invoicing.eta.gov.eg/*",
+    "https://api-portal.invoicing.eta.gov.eg/*",
+    "https://id.eta.gov.eg/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ETA eInvoicing Exporter"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://invoicing.eta.gov.eg/*"],
+      "js": ["mapping.js", "inject_main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://invoicing.eta.gov.eg/*"],
+      "js": ["relay.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}
