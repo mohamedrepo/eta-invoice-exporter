@@ -5,6 +5,7 @@ const $ = (id) => document.getElementById(id);
 const DEFAULTS = {
   from: '2025-07-01', to: new Date().toISOString().slice(0, 10),
   dateField: 'Submission', direction: 'Received', status: 'All', docType: 'All',
+  rin: '', rinRole: 'any',
   pageSize: 100, concurrency: 6, windowDays: 30, maxDocs: 0, includeDetails: true
 };
 
@@ -22,6 +23,8 @@ function readOpts() {
     direction: $('direction').value,
     status: $('status').value,
     docType: $('docType').value,
+    rin: ($('rin').value || '').replace(/\D+/g, ''),
+    rinRole: $('rinRole').value,
     pageSize: Math.max(10, Math.min(100, parseInt($('pageSize').value, 10) || 100)),
     concurrency: Math.max(1, Math.min(12, parseInt($('concurrency').value, 10) || 6)),
     windowDays: Math.max(1, Math.min(365, parseInt($('windowDays').value, 10) || 30)),
@@ -32,7 +35,7 @@ function readOpts() {
 
 function applyOpts(o) {
   if (!o) return;
-  for (const k of ['from', 'to', 'dateField', 'direction', 'status', 'docType']) if (o[k]) $(k).value = o[k];
+  for (const k of ['from', 'to', 'dateField', 'direction', 'status', 'docType', 'rin', 'rinRole']) if (o[k] != null) $(k).value = o[k];
   for (const k of ['pageSize', 'concurrency', 'windowDays', 'maxDocs']) if (o[k] != null) $(k).value = o[k];
   $('includeDetails').checked = o.includeDetails !== false;
 }

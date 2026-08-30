@@ -31,6 +31,10 @@ Requirements: Chrome 111+ (Edge also works via `edge://extensions`).
    - **From / To** — date range (30-day windows are used internally, matching API limits)
    - **Date field** — filter by submission date (تاريخ التقديم) or issue date (تاريخ الإصدار)
    - **Direction** — Received (وارد) / Sent (صادر) / Both
+   - **Registration number** — extract only documents where a specific RIN (e.g. `756158761`)
+     is the **sender**, the **receiver**, or **either side**. "Any side" runs two API passes
+     (as issuer + as receiver) and merges them, matching the portal's own search behavior.
+     Leave empty to export all parties.
    - **Status / Document type** — optional filters
    - **Detail workers** — parallel requests for per-invoice details (6 is polite and fast)
    - **Max documents** — safety cap; `0` = everything in the range
@@ -54,7 +58,7 @@ Everything was reverse-engineered from the portal's own JavaScript bundle:
 
 | Purpose | Endpoint (GET) |
 |---|---|
-| Invoice list (paginated) | `https://api-portal.invoicing.eta.gov.eg/api/v1/documents/recent?PageSize=100&PageNo=N&SubmissionDateFrom=…&SubmissionDateTo=…&Direction=Received&…` |
+| Invoice list (paginated) | `https://api-portal.invoicing.eta.gov.eg/api/v1/documents/recent?PageSize=100&PageNo=N&SubmissionDateFrom=…&SubmissionDateTo=…&Direction=Received&IssuerId=…&ReceiverId=…&…` |
 | Full document details | `https://api-portal.invoicing.eta.gov.eg/api/v1/documents/{uuid}/details` (fallback `{uuid}/raw`) |
 | PDF printout | `https://api-portal.invoicing.eta.gov.eg/api/v1/documents/{uuid}/pdf` |
 | Response shape | `{ result: DocumentSummary[], metadata: { totalPages, totalCount } }` |

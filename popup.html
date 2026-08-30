@@ -83,6 +83,14 @@
       <div><label>Detail workers</label><input type="number" id="concurrency" value="6" min="1" max="12" /></div>
       <div><label>Date window (days)</label><input type="number" id="windowDays" value="30" min="1" max="365" /></div>
       <div><label>Max documents (0 = all)</label><input type="number" id="maxDocs" value="0" min="0" /></div>
+      <div><label>Registration number (الرقم الضريبي)</label><input type="text" id="rin" placeholder="e.g. 756158761" inputmode="numeric" /></div>
+      <div><label>Number is</label>
+        <select id="rinRole">
+          <option value="any">Any side — sender or receiver</option>
+          <option value="issuer">Sender / issuer only (بائع)</option>
+          <option value="receiver">Receiver only (مشتري)</option>
+        </select>
+      </div>
       <div class="wide"><label><input type="checkbox" id="includeDetails" checked style="width:auto" /> Fetch full details per invoice (line items, taxes, addresses — needed for both sheets)</label></div>
     </div>
     <div class="btns">

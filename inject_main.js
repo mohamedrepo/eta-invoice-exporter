@@ -191,12 +191,13 @@
     throw lastErr || new Error('FETCH_FAILED');
   }
 
-  function recentUrl(o, pageNo, winFrom, winTo, variant, df) {
+  function recentUrl(o, pageNo, winFrom, winTo, variant, df, pass) {
     var p = new URLSearchParams();
     p.set('PageSize', String(o.pageSize || 100));
     p.set('PageNo', String(pageNo));
     if (o.status && o.status !== 'All') p.set('Status', o.status);
     if (o.docType && o.docType !== 'All') p.set('DocumentType', o.docType);
+    if (pass && pass.rinParam && o.rin) p.set(pass.rinParam, o.rin);
     if (variant && variant.dirParam && o.direction && o.direction !== 'Both') p.set(variant.dirParam, o.direction);
     if (variant && variant.tc != null) p.set('TimeCompliance', String(variant.tc));
     var dp = df === 'Issue' ? ['IssueDateFrom', 'IssueDateTo'] : ['SubmissionDateFrom', 'SubmissionDateTo'];
@@ -287,14 +288,14 @@
   // List-parameter probe on the first window: pick the variant that actually returns
   // rows. Zero-result "working" variants are remembered as fallback; if every variant
   // returns zero rows, the alternate date field (Submission ↔ Issue) is tried too.
-  async function probeList(opt, wa, wb, cands, authHolder) {
+  async function probeList(opt, wa, wb, cands, authHolder, pass) {
     var vlist = variants(opt);
     var firstOk = null, winner = null;
     var tried = [];
     async function attempt(df) {
       for (var vi = 0; vi < vlist.length; vi++) {
         await waitGate();
-        var url = recentUrl(opt, 1, wa, wb, vlist[vi], df);
+        var url = recentUrl(opt, 1, wa, wb, vlist[vi], df, pass);
         var res = await fetchJson(url, authHolder.auth, 2);
         if (res.status === 401 || res.status === 403) {
           authHolder.auth = await reauth(cands);
@@ -348,22 +349,35 @@
     send('PROGRESS', { phase: 'list', window: 0, windows: wins.length, page: 0, pages: '?', listed: 0 });
 
     var variant = null, dfUsed = opt.dateField === 'Issue' ? 'Issue' : 'Submission';
-    for (var wi = 0; wi < wins.length; wi++) {
+
+    // Registration-number filter: one pass per API param. "Any side" = issuer pass + receiver pass, merged & deduped.
+    var passes = [];
+    var rin = String(opt.rin || '').trim();
+    if (rin) {
+      if (opt.rinRole === 'issuer') passes.push({ rinParam: 'IssuerId', label: 'sender/issuer' });
+      else if (opt.rinRole === 'receiver') passes.push({ rinParam: 'ReceiverId', label: 'receiver' });
+      else { passes.push({ rinParam: 'IssuerId', label: 'sender/issuer' }); passes.push({ rinParam: 'ReceiverId', label: 'receiver' }); }
+    } else passes.push({ rinParam: null, label: 'all parties' });
+
+    for (var pi = 0; pi < passes.length; pi++) {
+      var pass = passes[pi];
+      if (passes.length > 1) send('LOG', { message: 'Pass ' + (pi + 1) + '/' + passes.length + ': documents where ' + rin + ' is the ' + pass.label + '...' });
+      for (var wi = 0; wi < wins.length; wi++) {
       var wa = wins[wi][0], wb = wins[wi][1];
       var pageNo = 1, totalPages = 1, empty = false;
       while (pageNo <= totalPages && !empty) {
         await waitGate();
         var res;
-        if (wi === 0 && pageNo === 1 && !variant) {
-          var probe = await probeList(opt, wa, wb, cands, authHolder);
+        if (pi === 0 && wi === 0 && pageNo === 1 && !variant) {
+          var probe = await probeList(opt, wa, wb, cands, authHolder, pass);
           variant = probe.variant; dfUsed = probe.dateField; auth = authHolder.auth; res = probe.first;
         } else {
-          res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed), auth);
+          res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed, pass), auth);
           if (res.status === 401 || res.status === 403) {
             authHolder.auth = await reauth(cands);
             if (!authHolder.auth) throw new Error('SESSION_EXPIRED');
             auth = authHolder.auth;
-            res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed), auth);
+            res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed, pass), auth);
           }
         }
         if (!res.ok) throw new Error('API_HTTP_' + res.status + ': ' + String(res.text || '').slice(0, 180));
@@ -378,11 +392,12 @@
           var key = s.longId || s.uuid;
           if (key && !seen.has(key)) { seen.add(key); summaries.push(s); }
         }
-        send('PROGRESS', { phase: 'list', window: wi + 1, windows: wins.length, page: pageNo, pages: totalPages, listed: summaries.length });
+        send('PROGRESS', { phase: 'list', pass: pi + 1, passes: passes.length, window: wi + 1, windows: wins.length, page: pageNo, pages: totalPages, listed: summaries.length });
         if (opt.maxDocs && summaries.length >= opt.maxDocs) { break; }
         pageNo++;
       }
       if (opt.maxDocs && summaries.length >= opt.maxDocs) break;
+      }
     }
 
     if (!opt.includeDetails) {
