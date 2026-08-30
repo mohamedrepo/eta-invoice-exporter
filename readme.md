@@ -32,9 +32,10 @@ Requirements: Chrome 111+ (Edge also works via `edge://extensions`).
    - **Date field** — filter by submission date (تاريخ التقديم) or issue date (تاريخ الإصدار)
    - **Direction** — Received (وارد) / Sent (صادر) / Both
    - **Registration number** — extract only documents where a specific RIN (e.g. `756158761`)
-     is the **sender**, the **receiver**, or **either side**. "Any side" runs two API passes
-     (as issuer + as receiver) and merges them, matching the portal's own search behavior.
-     Leave empty to export all parties.
+     is the **sender**, the **receiver**, or **either side**. Implemented on the portal's own
+     search endpoint (`documents/search?Query=…`) with **strict client-side matching**: only
+     rows whose issuer/receiver ID contains the RIN as an exact ID are kept — the portal's
+     fuzzy name matches are excluded. Leave empty for all parties.
    - **Status / Document type** — optional filters
    - **Detail workers** — parallel requests for per-invoice details (6 is polite and fast)
    - **Max documents** — safety cap; `0` = everything in the range

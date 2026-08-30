@@ -208,6 +208,38 @@
 
   // Variant order mirrors what the portal app itself sends: TimeCompliance 0=All/1=OnTime/2=Late
   // (never negative), and the direction filter rides on DocumentTypeName ("Received"/"sent").
+  function digits(v) { return String(v || '').replace(/\D+/g, ''); }
+
+  // strict RIN match: the search endpoint returns fuzzy hits too, so verify exactly.
+  // IDs may be composite like "RN5W8FR51MKN (756158761)" — compare complete digit runs.
+  function rinRowMatches(s, rin, role) {
+    var issRuns = String(s.issuerId || '').match(/\d{3,}/g) || [];
+    var recRuns = String(s.receiverId || '').match(/\d{3,}/g) || [];
+    var hitIss = issRuns.indexOf(rin) !== -1, hitRec = recRuns.indexOf(rin) !== -1;
+    if (role === 'issuer') return hitIss;
+    if (role === 'receiver') return hitRec;
+    return hitIss || hitRec;
+  }
+
+  function docTypeOk(s, o) {
+    if (!o.docType || o.docType === 'All') return true;
+    return String(s.typeName || '').toLowerCase() === String(o.docType).toLowerCase();
+  }
+
+  // Portal's own free-text search: Query matches RIN across issuer/receiver (works for any
+  // counterparty on the logged-in session). Role filtering is done client-side above.
+  function searchUrl(o, pageNo, winFrom, winTo, df) {
+    var p = new URLSearchParams();
+    p.set('Query', String(o.rin));
+    p.set('Page', String(pageNo));
+    p.set('PageSize', String(o.pageSize || 100));
+    if (o.status && o.status !== 'All') p.set('Status', o.status);
+    var dp = df === 'Issue' ? ['IssueDateFrom', 'IssueDateTo'] : ['SubmissionDateFrom', 'SubmissionDateTo'];
+    p.set(dp[0], winFrom.toISOString());
+    p.set(dp[1], winTo.toISOString());
+    return API + 'documents/search?' + p.toString();
+  }
+
   function variants(o) {
     var v = [];
     if (o.direction && o.direction !== 'Both') {
@@ -350,34 +382,37 @@
 
     var variant = null, dfUsed = opt.dateField === 'Issue' ? 'Issue' : 'Submission';
 
-    // Registration-number filter: one pass per API param. "Any side" = issuer pass + receiver pass, merged & deduped.
+    // Registration-number filter: the /recent endpoint ignores IssuerId/ReceiverId on this
+    // gateway, so RIN filtering uses the portal's own /documents/search?Query= endpoint with
+    // strict client-side matching on issuerId/receiverId (exact digits).
     var passes = [];
     var rin = String(opt.rin || '').trim();
-    if (rin) {
-      if (opt.rinRole === 'issuer') passes.push({ rinParam: 'IssuerId', label: 'sender/issuer' });
-      else if (opt.rinRole === 'receiver') passes.push({ rinParam: 'ReceiverId', label: 'receiver' });
-      else { passes.push({ rinParam: 'IssuerId', label: 'sender/issuer' }); passes.push({ rinParam: 'ReceiverId', label: 'receiver' }); }
-    } else passes.push({ rinParam: null, label: 'all parties' });
+    if (rin) passes.push({ searchMode: true, label: 'search Query=' + rin });
+    else passes.push({ rinParam: null, label: 'all parties' });
 
     for (var pi = 0; pi < passes.length; pi++) {
       var pass = passes[pi];
-      if (passes.length > 1) send('LOG', { message: 'Pass ' + (pi + 1) + '/' + passes.length + ': documents where ' + rin + ' is the ' + pass.label + '...' });
+      if (pass.searchMode) send('LOG', { message: 'Searching documents for RIN ' + rin + ' (strict match, role: ' + (opt.rinRole || 'any') + ')...' });
+      else if (passes.length > 1) send('LOG', { message: 'Pass ' + (pi + 1) + '/' + passes.length + ': documents where ' + rin + ' is the ' + pass.label + '...' });
       for (var wi = 0; wi < wins.length; wi++) {
       var wa = wins[wi][0], wb = wins[wi][1];
       var pageNo = 1, totalPages = 1, empty = false;
       while (pageNo <= totalPages && !empty) {
         await waitGate();
         var res;
-        if (pi === 0 && wi === 0 && pageNo === 1 && !variant) {
+        var url = pass.searchMode
+          ? searchUrl(opt, pageNo, wa, wb, dfUsed)
+          : recentUrl(opt, pageNo, wa, wb, variant, dfUsed, pass);
+        if (pi === 0 && wi === 0 && pageNo === 1 && !variant && !pass.searchMode) {
           var probe = await probeList(opt, wa, wb, cands, authHolder, pass);
           variant = probe.variant; dfUsed = probe.dateField; auth = authHolder.auth; res = probe.first;
         } else {
-          res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed, pass), auth);
+          res = await fetchJson(url, auth);
           if (res.status === 401 || res.status === 403) {
             authHolder.auth = await reauth(cands);
             if (!authHolder.auth) throw new Error('SESSION_EXPIRED');
             auth = authHolder.auth;
-            res = await fetchJson(recentUrl(opt, pageNo, wa, wb, variant, dfUsed, pass), auth);
+            res = await fetchJson(url, auth);
           }
         }
         if (!res.ok) throw new Error('API_HTTP_' + res.status + ': ' + String(res.text || '').slice(0, 180));
@@ -386,7 +421,24 @@
         var md = j.metadata || {};
         if (md.totalPages) totalPages = md.totalPages;
         else if (md.totalCount) totalPages = Math.max(totalPages, Math.ceil((md.totalCount | 0) / (parseInt(opt.pageSize, 10) || 100)));
-        if (!rowsArr.length) { empty = true; break; }
+        if (pass.searchMode) {
+          var rawLen = rowsArr.length, kept = [];
+          for (var k = 0; k < rawLen; k++) {
+            var cand = rowsArr[k];
+            if (rinRowMatches(cand, rin, opt.rinRole) && docTypeOk(cand, opt)) kept.push(cand);
+          }
+          if (pi === 0 && wi === 0 && pageNo === 1) {
+            send('LOG', { message: 'Search page 1: ' + rawLen + ' results, ' + kept.length + ' exactly match RIN ' + rin + '.' });
+          }
+          rowsArr = kept;
+        }
+        if (!rowsArr.length) {
+          if (!pass.searchMode) { empty = true; break; }
+          // search mode: later pages may still contain matches — page through metadata.totalPages
+          if (pageNo >= totalPages) { empty = true; break; }
+          pageNo++;
+          continue;
+        }
         for (var ri = 0; ri < rowsArr.length; ri++) {
           var s = rowsArr[ri];
           var key = s.longId || s.uuid;
