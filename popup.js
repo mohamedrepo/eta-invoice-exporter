@@ -4,10 +4,20 @@
 const $ = (id) => document.getElementById(id);
 const DEFAULTS = {
   from: '2025-07-01', to: new Date().toISOString().slice(0, 10),
-  dateField: 'Submission', direction: 'Received', status: 'All', docType: 'All',
+  dateField: 'Submission', direction: 'Both', status: 'All', docType: 'All',
   rin: '', rinRole: 'any',
   pageSize: 100, concurrency: 6, windowDays: 30, maxDocs: 0, includeDetails: true
 };
+
+// save form edits as they change (debounced) so nothing reverts and nothing is lost
+let optsAppliedOnce = false;
+let saveTimer = 0;
+function scheduleOptSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { chrome.storage.local.set({ eta_opts: readOpts() }); } catch (e) {}
+  }, 400);
+}
 
 function sendPop(msg) {
   return chrome.runtime.sendMessage({ __etaPop: 1, ...msg });
@@ -104,7 +114,7 @@ async function refresh() {
   const resp = await sendPop({ type: 'STATE' });
   if (resp && resp.ok) {
     render(resp.state);
-    if (resp.opts) applyOpts(resp.opts);
+    if (resp.opts && !optsAppliedOnce) { applyOpts(resp.opts); optsAppliedOnce = true; } // restore saved filters only once on open — never re-type over the user's edits
   }
 }
 
@@ -249,3 +259,23 @@ function fetchPdfB64(url, auth, headersJson) {
 
 refresh();
 setInterval(refresh, 1200);
+
+// persist edits live + one-time migration: direction defaults to Both
+['from', 'to', 'dateField', 'direction', 'status', 'docType', 'rin', 'rinRole', 'pageSize', 'concurrency', 'windowDays', 'maxDocs', 'includeDetails'].forEach(id => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('change', scheduleOptSave);
+  if (el.type === 'text' || el.type === 'number' || el.type === 'date') el.addEventListener('input', scheduleOptSave);
+});
+(async () => {
+  try {
+    const MIG = 'eta_dir_both_migrated';
+    const got = await chrome.storage.local.get([MIG, 'eta_opts']);
+    if (!got[MIG]) {
+      const o = got.eta_opts || {};
+      o.direction = 'Both';
+      await chrome.storage.local.set({ eta_opts: o });
+      await chrome.storage.local.set({ [MIG]: true });
+    }
+  } catch (e) {}
+})();
