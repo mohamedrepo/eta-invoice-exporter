@@ -453,13 +453,14 @@
     }
 
     if (!opt.includeDetails) {
-      var acc = [];
+      var acc = [], accK = [];
       for (var si = 0; si < summaries.length; si++) {
         await waitGate();
         acc.push(M.mapInvoice(summaries[si], null, si + 1));
-        if (acc.length >= 200) { send('BATCH', { rows: acc, itemRows: [], keys: [] }); acc = []; }
+        accK.push(summaries[si].uuid || summaries[si].longId);
+        if (acc.length >= 200) { send('BATCH', { rows: acc, itemRows: [], keys: accK }); acc = []; accK = []; }
       }
-      if (acc.length) send('BATCH', { rows: acc, itemRows: [], keys: [] });
+      if (acc.length) send('BATCH', { rows: acc, itemRows: [], keys: accK });
       ctl.running = false;
       send('DONE', { docs: summaries.length, items: 0, elapsedMs: Date.now() - t0 });
       return;

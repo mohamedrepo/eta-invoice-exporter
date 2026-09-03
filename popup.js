@@ -81,6 +81,7 @@ function render(st) {
   $('exportCsv').disabled = !hasData;
   $('pdfs').disabled = !hasData;
   $('start').disabled = st.running;
+  $('clear').disabled = st.running; // no data wipe mid-crawl
   $('pause').disabled = !st.running;
   $('pause').textContent = st.paused ? 'Resume crawl' : 'Pause';
   $('cancel').disabled = !st.running;
@@ -144,6 +145,29 @@ $('clear').addEventListener('click', async () => {
   if (!confirm('Delete all collected invoice data stored by this extension?')) return;
   await sendPop({ type: 'CLEAR' });
   refresh();
+});
+$('dbg').addEventListener('click', async () => {
+  const r = await sendPop({ type: 'GET_DEBUG' });
+  if (!r || !r.ok) { $('err').textContent = 'Could not collect debug data.'; return; }
+  const lines = [];
+  lines.push('=== ETA Exporter Debug Report ===');
+  lines.push('version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+  lines.push('ua: ' + navigator.userAgent);
+  lines.push('time: ' + new Date().toISOString());
+  lines.push('--- state ---');
+  lines.push(JSON.stringify(r.state || {}, null, 2));
+  lines.push('--- options ---');
+  lines.push(JSON.stringify(r.opts || {}, null, 2));
+  lines.push('--- event log (oldest first) ---');
+  for (const e of r.log || []) lines.push('[' + e.ts + '] ' + e.type + ': ' + e.text);
+  const text = lines.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    $('status').textContent = 'Debug report copied to clipboard — paste it in the chat.';
+  } catch (e) {
+    $('err').textContent = 'Clipboard blocked — the report was printed to the extension console (F12).';
+    console.log(text);
+  }
 });
 $('exportXlsx').addEventListener('click', () => {
   chrome.windows.create({ url: chrome.runtime.getURL('export.html?kind=xlsx'), type: 'popup', width: 520, height: 360 });

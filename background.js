@@ -15,6 +15,13 @@ const P_SEEN = 'eta_seen_c';
 const FLUSH_AT = 1000;
 
 let run = defaults();
+// diagnostic event ring buffer (survives popup reopen, cleared with data reset)
+let evlog = [];
+let batchCount = 0;
+function ev(type, text) {
+  evlog.push({ ts: new Date().toISOString().slice(11, 19), type, text: String(text || '').slice(0, 300) });
+  if (evlog.length > 250) evlog.shift();
+}
 function defaults() {
   return {
     running: false, paused: false, interrupted: false,
@@ -134,25 +141,31 @@ function handleRelay(msg, sender) {
       chrome.storage.local.set({ [KEY_AUTH]: { auth: d.auth || null, headers: d.headers || {} } }).catch(() => {});
       break;
     case 'LOG':
+      ev('LOG', d.message);
       run.lastError = null;
       run.progress.log = String(d.message || '').slice(0, 200);
       broadcast();
       break;
     case 'PROGRESS':
+      ev('PROG', JSON.stringify(d));
       run.progress = Object.assign({}, run.progress, d);
       broadcast();
       break;
     case 'BATCH': {
+      if (!run.running) break; // strays after cancel/error must not touch storage
       const rows = d.rows || [], items = d.itemRows || [], keys = d.keys || [];
       pending.rows.push(...rows);
       pending.items.push(...items);
       pending.seen.push(...keys);
       run.stats.docs += rows.length;
       run.stats.items += items.length;
+      batchCount++;
+      if (batchCount % 10 === 0) ev('BATCH', 'batches=' + batchCount + ' rows+=' + rows.length + ' items+=' + items.length);
       flushChunks(false).then(broadcast).catch(() => {});
       break;
     }
     case 'DONE':
+      ev('DONE', JSON.stringify(d));
       flushChunks(true).then(() => {
         run.running = false; run.finishedAt = Date.now();
         if (d.errors) run.stats.errors = d.errors;
@@ -160,6 +173,7 @@ function handleRelay(msg, sender) {
       }).catch(() => {});
       break;
     case 'ERROR':
+      ev('ERROR', String(d.message || 'Unknown error') + (d.cancelled ? ' (cancelled)' : ''));
       if (!d.cancelled) run.lastError = String(d.message || 'Unknown error');
       if (d.fatal || d.cancelled) {
         run.running = false;
@@ -173,6 +187,7 @@ let authCache = null;
 
 // ---------- popup commands ----------
 async function handlePopup(msg) {
+  ev('CMD', msg.type);
   switch (msg.type) {
     case 'STATE':
       return { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null };
@@ -245,12 +260,15 @@ async function handlePopup(msg) {
       return pingPortal();
     case 'CLEAR':
       await clearData();
+      evlog = []; batchCount = 0;
       run = defaults();
       await saveMeta();
       broadcast();
       return { ok: true };
     case 'GET_AUTH':
       return { ok: true, auth: (await getStorage(KEY_AUTH)) || null };
+    case 'GET_DEBUG':
+      return { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null, log: evlog };
     default:
       return { ok: false, error: 'UNKNOWN_CMD' };
   }

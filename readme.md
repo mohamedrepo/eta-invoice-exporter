@@ -95,6 +95,10 @@ is mostly bound by the details phase, which runs 6× concurrent.
 
 ## 6. Troubleshooting
 
+- **Anything acting weird?** Press **Copy debug report** in the popup — it puts a full
+  diagnostic snapshot (version, options, run state, last 250 events) on your clipboard.
+  Paste it into a support chat and the problem can be diagnosed from it directly.
+
 - **"NOT_LOGGED_IN / Auth token red"** — open the portal and log in, then press
   **Check connection** (the token is picked up automatically; no need to restart the export… but a fresh Start is cleanest).
 - **"SESSION_EXPIRED"** — the portal rejected every auth candidate. **Refresh the portal page (F5)** so the app issues a fresh token, confirm the documents list opens normally, then press **Start** again. The log now shows the full auth probe matrix (each candidate × credentials mode × HTTP status); if every row shows 401/403 even after a refresh, log out and back in on the portal.
