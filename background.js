@@ -268,8 +268,27 @@ async function handlePopup(msg) {
       return { ok: true };
     case 'GET_AUTH':
       return { ok: true, auth: (await getStorage(KEY_AUTH)) || null };
-    case 'GET_DEBUG':
-      return { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null, log: evlog };
+    case 'GET_DEBUG': {
+      const base = { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null, log: evlog };
+      try {
+        const tab = await findPortalTab();
+        if (!tab) { base.probe = { ok: false, error: 'NO_PORTAL_TAB' }; return base; }
+        const authInfo = (await getStorage(KEY_AUTH)) || {};
+        const o = base.opts || {};
+        const rin = String(o.rin || '').trim();
+        const probeUrl = rin
+          ? 'https://api-portal.invoicing.eta.gov.eg/api/v1/documents/search?Query=' + encodeURIComponent(rin) + '&Page=1&PageSize=3'
+          : 'https://api-portal.invoicing.eta.gov.eg/api/v1/documents/recent?PageSize=2&PageNo=1';
+        const res = await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, world: 'MAIN', func: probeApiSample,
+          args: [probeUrl, authInfo.auth || null, JSON.stringify(authInfo.headers || {})]
+        });
+        base.probe = (res && res[0] && res[0].result) ? res[0].result : { ok: false, error: 'NO_RESULT' };
+      } catch (e) {
+        base.probe = { ok: false, error: String(e && e.message || e).slice(0, 200) };
+      }
+      return base;
+    }
     default:
       return { ok: false, error: 'UNKNOWN_CMD' };
   }
@@ -304,3 +323,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     authCache = a && a.auth;
   } catch (e) {}
 })();
+
+
+// runs in the portal tab (MAIN world): one live API request, shape-only capture
+function probeApiSample(url, auth, headersJson) {
+  return (async () => {
+    try {
+      const headers = {};
+      try { Object.assign(headers, JSON.parse(headersJson || '{}')); } catch (e) {}
+      if (auth) headers['Authorization'] = auth;
+      headers['Accept'] = 'text/plain';
+      const r = await fetch(url, { headers, credentials: 'omit' });
+      const text = await r.text();
+      let j = null; try { j = JSON.parse(text); } catch (e) {}
+      const out = { ok: r.ok, status: r.status, url: String(url).replace(/[?&](SubmissionDateFrom|SubmissionDateTo|IssueDateFrom|IssueDateTo)=[^&]*/g, '') };
+      if (j && typeof j === 'object') {
+        out.topKeys = Object.keys(j).slice(0, 12);
+        if (j.metadata) out.metadata = j.metadata;
+        const rows = j.result || j.documents || (Array.isArray(j) ? j : []);
+        out.rowCount = rows.length;
+        if (rows.length && rows[0] && typeof rows[0] === 'object') {
+          const r0 = rows[0];
+          out.firstRowKeys = Object.keys(r0);
+          out.firstRow = {};
+          for (const k of Object.keys(r0)) {
+            const v = r0[k];
+            out.firstRow[k] = (v === null || typeof v !== 'object') ? v : (Array.isArray(v) ? '[array:' + v.length + ']' : '[object]');
+          }
+        }
+      } else {
+        out.bodyStart = String(text || '').slice(0, 160);
+      }
+      return out;
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  })();
+}

@@ -596,6 +596,12 @@
     for (var w = 0; w < conc; w++) workers.push(worker());
     await Promise.all(workers);
     if (accRows.length) send('BATCH', { rows: accRows, itemRows: accItems, keys: accKeys });
+    if (rin && emitted === 0 && summaries.length) {
+      try {
+        send('LOG', { message: 'No candidate matched RIN ' + rin + ' — first candidate as returned by search: ' + JSON.stringify(summaries[0]).slice(0, 500) });
+        send('LOG', { message: 'If this looks wrong, use "Copy debug report" — it now includes a live API probe of the search response.' });
+      } catch (e) {}
+    }
 
     ctl.running = false;
     send('DONE', { docs: emitted, scanned: summaries.length, items: itemsCount, elapsedMs: Date.now() - t0, errors: detailErrors, dropped: rinDropped });
