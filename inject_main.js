@@ -208,8 +208,6 @@
 
   // Variant order mirrors what the portal app itself sends: TimeCompliance 0=All/1=OnTime/2=Late
   // (never negative), and the direction filter rides on DocumentTypeName ("Received"/"sent").
-  function digits(v) { return String(v || '').replace(/\D+/g, ''); }
-
   // strict RIN match: the search endpoint returns fuzzy hits too, so verify exactly.
   // IDs may be composite like "RN5W8FR51MKN (756158761)" — compare complete digit runs.
   function rinRowMatches(s, rin, role) {
@@ -371,7 +369,9 @@
 
     var from = new Date(opt.from + 'T00:00:00');
     var to = new Date(opt.to + 'T23:59:59.999');
-    var wins = makeWindows(from, to, parseInt(opt.windowDays, 10) || 30);
+    var effWindowDays = parseInt(opt.windowDays, 10) || 30;
+    if (String(opt.rin || '').trim()) effWindowDays = Math.min(effWindowDays, 30); // search API max span
+    var wins = makeWindows(from, to, effWindowDays);
 
     var summaries = [];
     var seen = new Set();
