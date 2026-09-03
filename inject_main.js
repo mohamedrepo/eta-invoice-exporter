@@ -240,6 +240,27 @@
     if (!o.docType || o.docType === 'All') return true;
     return String(raw.documentType || '').toLowerCase() === String(o.docType).toLowerCase();
   }
+  // The /documents/search response uses different field names than /documents/recent
+  // (empirically: no uuid/longId at all). ETA document ids are 26-char uppercase
+  // alphanumeric values — scan the whole row for them and try each against the API.
+  function collectIdCandidates(s) {
+    var found = [];
+    function scan(v, depth) {
+      if (v == null || found.length >= 6) return;
+      if (typeof v === 'string') {
+        if (/^[A-Z0-9]{26}$/.test(v) && found.indexOf(v) === -1) found.push(v);
+        return;
+      }
+      if (typeof v === 'object' && depth < 2) {
+        for (var k in v) {
+          if (found.length >= 6) return;
+          try { scan(v[k], depth + 1); } catch (e) {}
+        }
+      }
+    }
+    scan(s, 0);
+    return found;
+  }
 
   function docTypeOk(s, o) {
     if (!o.docType || o.docType === 'All') return true;
@@ -398,7 +419,7 @@
     var summaries = [];
     var seen = new Set();
     var detailErrors = 0;
-    var rinDropped = 0, emitted = 0, searchLogDone = false;
+    var rinDropped = 0, emitted = 0, searchLogDone = false, noKeyDumped = false;
     var needDetails = opt.includeDetails || !!rin; // RIN verification needs full documents
     var skip = new Set(opt.skipUuids || []);
 
@@ -451,6 +472,7 @@
           if (!searchLogDone) {
             searchLogDone = true;
             send('LOG', { message: 'Search found ' + rawLen + ' candidate(s) for RIN ' + rin + ' — verifying each via document details...' });
+            try { send('LOG', { message: 'First candidate as returned: ' + JSON.stringify(rowsArr[0]).slice(0, 600) }); } catch (e) {}
           }
           if (rawLen === 0) { empty = true; break; } // page beyond available results
         }
@@ -463,8 +485,13 @@
         }
         for (var ri = 0; ri < rowsArr.length; ri++) {
           var s = rowsArr[ri];
-          var key = s.longId || s.uuid;
+          if (pass.searchMode && !s.__ids) s.__ids = collectIdCandidates(s);
+          var key = (s.__ids && s.__ids[0]) || s.uuid || s.longId;
           if (key && !seen.has(key)) { seen.add(key); summaries.push(s); }
+          else if (!key && pass.searchMode && !noKeyDumped) {
+            noKeyDumped = true;
+            send('LOG', { message: 'Candidate without usable id field: ' + JSON.stringify(s).slice(0, 500) });
+          }
         }
         send('PROGRESS', { phase: 'list', pass: pi + 1, passes: passes.length, window: wi + 1, windows: wins.length, page: pageNo, pages: totalPages, listed: summaries.length });
         if (opt.maxDocs && summaries.length >= opt.maxDocs) { break; }
@@ -479,7 +506,7 @@
       var acc = [], accK = [];
       for (var si = 0; si < summaries.length; si++) {
         await waitGate();
-        var sKey = summaries[si].uuid || summaries[si].longId;
+        var sKey = (summaries[si].__ids && summaries[si].__ids[0]) || summaries[si].uuid || summaries[si].longId;
         if (skip.has(sKey)) continue; // already exported in a previous run — no duplicates on Resume
         acc.push(M.mapInvoice(summaries[si], null, si + 1));
         accK.push(sKey);
@@ -495,7 +522,7 @@
     send('PROGRESS', { phase: 'details', detailsDone: 0, detailsTotal: summaries.length, listed: summaries.length, errors: 0 });
     var idx = 0, doneD = 0, itemsCount = 0;
     var accRows = [], accItems = [], accKeys = [];
-    var detailKeyField = null; // 'uuid' or 'longId' — remembered once one works
+    var detailKeyWin = null; // id value that worked — tried first afterwards
 
     function diagDoc(doc, idf) {
       try {
@@ -507,11 +534,12 @@
 
     async function fetchDetails(s) {
       var ids = [];
-      if (s.uuid) ids.push(['uuid', s.uuid]);
-      if (s.longId) ids.push(['longId', s.longId]);
-      if (detailKeyField) ids.sort(function (x, y) { return (x[0] === detailKeyField ? -1 : 1) - (y[0] === detailKeyField ? -1 : 1); });
+      function addId(v) { if (v && ids.indexOf(v) === -1) ids.push(v); }
+      addId(s.uuid); addId(s.longId);
+      if (s.__ids) for (var q = 0; q < s.__ids.length; q++) addId(s.__ids[q]);
+      if (detailKeyWin) { var ix = ids.indexOf(detailKeyWin); if (ix > 0) { ids.splice(ix, 1); ids.unshift(detailKeyWin); } }
       for (var i = 0; i < ids.length; i++) {
-        var idf = ids[i][0], idv = ids[i][1];
+        var idv = ids[i];
         var res = await fetchJson(API + 'documents/' + encodeURIComponent(idv) + '/details', auth);
         if (res.status === 401 || res.status === 403) {
           authHolder.auth = await reauth(cands);
@@ -522,7 +550,7 @@
         if (res.ok && res.json) {
           var doc = extractDoc(res.json);
           if (doc && (doc.invoiceLines || doc.documentLines || doc.issuer || doc.internalID)) {
-            if (!detailKeyField) { detailKeyField = idf; diagDoc(doc, idf); }
+            if (!detailKeyWin) { detailKeyWin = idv; diagDoc(doc, idv); }
             return doc;
           }
         }
@@ -546,7 +574,7 @@
         if (i >= summaries.length) break;
         await waitGate();
         var s = summaries[i];
-        var key = s.uuid || s.longId;
+        var key = (s.__ids && s.__ids[0]) || s.uuid || s.longId;
         if (!skip.has(key)) {
           var raw = null;
           try { raw = await fetchDetails(s); }
