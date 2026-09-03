@@ -169,6 +169,7 @@ function handleRelay(msg, sender) {
       flushChunks(true).then(() => {
         run.running = false; run.finishedAt = Date.now();
         if (d.errors) run.stats.errors = d.errors;
+        run.stats.dropped = d.dropped || 0;
         saveMeta().then(broadcast).catch(() => {});
       }).catch(() => {});
       break;

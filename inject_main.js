@@ -210,15 +210,35 @@
 
   // Variant order mirrors what the portal app itself sends: TimeCompliance 0=All/1=OnTime/2=Late
   // (never negative), and the direction filter rides on DocumentTypeName ("Received"/"sent").
-  // strict RIN match: the search endpoint returns fuzzy hits too, so verify exactly.
-  // IDs may be composite like "RN5W8FR51MKN (756158761)" — compare complete digit runs.
+  // strict RIN match: IDs may be composite like "RN5W8FR51MKN (756158761)" and may be
+  // zero-padded — compare complete digit runs with leading zeros stripped.
+  function rinRuns(v) {
+    var runs = String(v || '').match(/\d{3,}/g) || [];
+    var norm = [];
+    for (var i = 0; i < runs.length; i++) norm.push(runs[i].replace(/^0+/, ''));
+    return norm;
+  }
+  function rinHit(v, target) { return rinRuns(v).indexOf(target) !== -1; }
   function rinRowMatches(s, rin, role) {
-    var issRuns = String(s.issuerId || '').match(/\d{3,}/g) || [];
-    var recRuns = String(s.receiverId || '').match(/\d{3,}/g) || [];
-    var hitIss = issRuns.indexOf(rin) !== -1, hitRec = recRuns.indexOf(rin) !== -1;
+    var target = String(rin).replace(/^0+/, '');
+    var hitIss = rinHit(s.issuerId, target), hitRec = rinHit(s.receiverId, target);
     if (role === 'issuer') return hitIss;
     if (role === 'receiver') return hitRec;
     return hitIss || hitRec;
+  }
+  // authoritative check against the full document (raw.issuer.id / raw.receiver.id)
+  function rinDocMatches(raw, rin, role) {
+    var target = String(rin).replace(/^0+/, '');
+    var iss = raw.issuer || {}, rec = raw.receiver || {};
+    var hitIss = rinHit(iss.id, target) || rinHit(iss.taxpayerId, target);
+    var hitRec = rinHit(rec.id, target) || rinHit(rec.taxpayerId, target);
+    if (role === 'issuer') return hitIss;
+    if (role === 'receiver') return hitRec;
+    return hitIss || hitRec;
+  }
+  function docTypeOkRaw(raw, o) {
+    if (!o.docType || o.docType === 'All') return true;
+    return String(raw.documentType || '').toLowerCase() === String(o.docType).toLowerCase();
   }
 
   function docTypeOk(s, o) {
@@ -378,6 +398,8 @@
     var summaries = [];
     var seen = new Set();
     var detailErrors = 0;
+    var rinDropped = 0, emitted = 0, searchLogDone = false;
+    var needDetails = opt.includeDetails || !!rin; // RIN verification needs full documents
     var skip = new Set(opt.skipUuids || []);
 
     send('PROGRESS', { phase: 'list', window: 0, windows: wins.length, page: 0, pages: '?', listed: 0 });
@@ -423,16 +445,14 @@
         var md = j.metadata || {};
         if (md.totalPages) totalPages = md.totalPages;
         else if (md.totalCount) totalPages = Math.max(totalPages, Math.ceil((md.totalCount | 0) / (parseInt(opt.pageSize, 10) || 100)));
+        var rawLen = rowsArr.length;
         if (pass.searchMode) {
-          var rawLen = rowsArr.length, kept = [];
-          for (var k = 0; k < rawLen; k++) {
-            var cand = rowsArr[k];
-            if (rinRowMatches(cand, rin, opt.rinRole) && docTypeOk(cand, opt)) kept.push(cand);
+          // search summaries are fuzzy candidates; the RIN check happens on the full document
+          if (!searchLogDone) {
+            searchLogDone = true;
+            send('LOG', { message: 'Search found ' + rawLen + ' candidate(s) for RIN ' + rin + ' — verifying each via document details...' });
           }
-          if (pi === 0 && wi === 0 && pageNo === 1) {
-            send('LOG', { message: 'Search page 1: ' + rawLen + ' results, ' + kept.length + ' exactly match RIN ' + rin + '.' });
-          }
-          rowsArr = kept;
+          if (rawLen === 0) { empty = true; break; } // page beyond available results
         }
         if (!rowsArr.length) {
           if (!pass.searchMode) { empty = true; break; }
@@ -454,7 +474,8 @@
       }
     }
 
-    if (!opt.includeDetails) {
+    if (rin && !opt.includeDetails) send('LOG', { message: 'RIN filtering verifies each document via its details — fetching details for all candidates.' });
+    if (!needDetails) {
       var acc = [], accK = [];
       for (var si = 0; si < summaries.length; si++) {
         await waitGate();
@@ -537,19 +558,35 @@
             detailErrors++;
             if (detailErrors === 1) send('LOG', { message: 'No details returned for ' + key + ' — exporting summary row only (errors counter will include these).' });
           }
-          accRows.push(M.mapInvoice(s, raw, i + 1));
-          var items = M.mapLines(s, raw);
-          for (var it = 0; it < items.length; it++) accItems.push(items[it]);
-          itemsCount += items.length;
-          accKeys.push(key);
-          if (accRows.length >= 40) {
-            send('BATCH', { rows: accRows, itemRows: accItems, keys: accKeys });
-            accRows = []; accItems = []; accKeys = [];
+          var emit = true;
+          if (rin) {
+            if (raw) emit = rinDocMatches(raw, rin, opt.rinRole) && docTypeOkRaw(raw, opt);
+            else emit = rinRowMatches(s, rin, opt.rinRole) && docTypeOk(s, opt); // details failed — best effort
+            if (!emit) {
+              rinDropped++;
+              if (rinDropped === 1) {
+                try {
+                  send('LOG', { message: 'First non-match dropped: ' + key + ' issuer=' + JSON.stringify(raw && raw.issuer || null).slice(0, 160) + ' receiver=' + JSON.stringify(raw && raw.receiver || null).slice(0, 160) });
+                } catch (e2) {}
+              }
+            }
+          }
+          if (emit) {
+            emitted++;
+            accRows.push(M.mapInvoice(s, raw, emitted));
+            var items = M.mapLines(s, raw);
+            for (var it = 0; it < items.length; it++) accItems.push(items[it]);
+            itemsCount += items.length;
+            accKeys.push(key);
+            if (accRows.length >= 40) {
+              send('BATCH', { rows: accRows, itemRows: accItems, keys: accKeys });
+              accRows = []; accItems = []; accKeys = [];
+            }
           }
         }
         doneD++;
         if (doneD % 20 === 0 || doneD === summaries.length) {
-          send('PROGRESS', { phase: 'details', detailsDone: doneD, detailsTotal: summaries.length, listed: summaries.length, errors: detailErrors, items: itemsCount });
+          send('PROGRESS', { phase: 'details', detailsDone: doneD, detailsTotal: summaries.length, listed: summaries.length, errors: detailErrors, items: itemsCount, matched: emitted, dropped: rinDropped });
         }
       }
     }
@@ -561,6 +598,6 @@
     if (accRows.length) send('BATCH', { rows: accRows, itemRows: accItems, keys: accKeys });
 
     ctl.running = false;
-    send('DONE', { docs: summaries.length, items: itemsCount, elapsedMs: Date.now() - t0, errors: detailErrors });
+    send('DONE', { docs: emitted, scanned: summaries.length, items: itemsCount, elapsedMs: Date.now() - t0, errors: detailErrors, dropped: rinDropped });
   }
 })();
