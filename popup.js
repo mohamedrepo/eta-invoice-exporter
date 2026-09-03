@@ -47,6 +47,7 @@ function setDots(st) {
 }
 
 let lastState = null;
+let statusHoldUntil = 0;
 function render(st) {
   lastState = st;
   setDots(st);
@@ -72,7 +73,7 @@ function render(st) {
     pct = 0;
   } else txt = 'Idle.';
 
-  $('status').innerHTML = txt;
+  if (Date.now() > statusHoldUntil) $('status').innerHTML = txt; // hold transient feedback
   $('barIn').style.width = pct + '%';
   $('err').textContent = st.lastError || '';
 
@@ -163,6 +164,7 @@ $('dbg').addEventListener('click', async () => {
   const text = lines.join('\n');
   try {
     await navigator.clipboard.writeText(text);
+    statusHoldUntil = Date.now() + 5000;
     $('status').textContent = 'Debug report copied to clipboard — paste it in the chat.';
   } catch (e) {
     $('err').textContent = 'Clipboard blocked — the report was printed to the extension console (F12).';

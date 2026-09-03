@@ -144,7 +144,9 @@
 
   function describeAuth(a) {
     if (!a) return '(none)';
-    return a.slice(0, 12) + '…(' + a.length + ' chars)';
+    var sp = a.indexOf(' ');
+    var scheme = sp > 0 ? a.slice(0, sp) : a.slice(0, 3);
+    return 'scheme "' + scheme + '", ' + a.length + ' chars'; // no token material
   }
 
   // credentials strategy: 'omit' avoids CORS-with-credentials failures when the
@@ -456,8 +458,10 @@
       var acc = [], accK = [];
       for (var si = 0; si < summaries.length; si++) {
         await waitGate();
+        var sKey = summaries[si].uuid || summaries[si].longId;
+        if (skip.has(sKey)) continue; // already exported in a previous run — no duplicates on Resume
         acc.push(M.mapInvoice(summaries[si], null, si + 1));
-        accK.push(summaries[si].uuid || summaries[si].longId);
+        accK.push(sKey);
         if (acc.length >= 200) { send('BATCH', { rows: acc, itemRows: [], keys: accK }); acc = []; accK = []; }
       }
       if (acc.length) send('BATCH', { rows: acc, itemRows: [], keys: accK });

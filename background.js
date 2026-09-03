@@ -152,7 +152,7 @@ function handleRelay(msg, sender) {
       broadcast();
       break;
     case 'BATCH': {
-      if (!run.running) break; // strays after cancel/error must not touch storage
+      if (!run.running) { ev('DROP', 'stray batch dropped after stop (rows=' + (d.rows || []).length + ')'); break; } // strays after cancel/error must not touch storage
       const rows = d.rows || [], items = d.itemRows || [], keys = d.keys || [];
       pending.rows.push(...rows);
       pending.items.push(...items);
@@ -187,7 +187,7 @@ let authCache = null;
 
 // ---------- popup commands ----------
 async function handlePopup(msg) {
-  ev('CMD', msg.type);
+  if (msg.type !== 'STATE' && msg.type !== 'GET_DEBUG') ev('CMD', msg.type); // keep polls out of the ring
   switch (msg.type) {
     case 'STATE':
       return { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null };
