@@ -18,6 +18,7 @@ let run = defaults();
 // diagnostic event ring buffer (survives popup reopen, cleared with data reset)
 let evlog = [];
 let batchCount = 0;
+let runGen = 0; // generation guard: cancels invalidate in-flight startups
 function ev(type, text) {
   evlog.push({ ts: new Date().toISOString().slice(11, 19), type, text: String(text || '').slice(0, 300) });
   if (evlog.length > 250) evlog.shift();
@@ -105,13 +106,33 @@ async function findPortalTab() {
   return tabs.length ? tabs[0] : null;
 }
 
-async function waitRelayReady(tabId, timeoutMs) {
+async function pingOnce(tabId) {
+  try {
+    const resp = await chrome.tabs.sendMessage(tabId, { type: 'RELAY_PING' });
+    return !!(resp && resp.ok);
+  } catch (e) { return false; }
+}
+
+// Wait for the portal page's relay, re-injecting the scripts if the page holds a stale
+// copy (typical after an extension reload without refreshing the tab).
+async function ensureRelay(tabId, gen, timeoutMs) {
   const t0 = Date.now();
+  let injected = false, attempts = 0;
   while (Date.now() - t0 < timeoutMs) {
-    try {
-      const resp = await chrome.tabs.sendMessage(tabId, { type: 'RELAY_PING' });
-      if (resp && resp.ok) return true;
-    } catch (e) {}
+    if (gen !== runGen) return false; // superseded by a newer command
+    attempts++;
+    if (await pingOnce(tabId)) return true;
+    if (!injected && attempts >= 3) {
+      injected = true;
+      ev('LOG', 'Portal page not responding - re-injecting the extension scripts into the page...');
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['mapping.js', 'inject_main.js'], world: 'MAIN' });
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['relay.js'], world: 'ISOLATED' });
+        ev('LOG', 'Scripts re-injected - retrying...');
+      } catch (e) {
+        ev('LOG', 'Re-injection failed: ' + String(e && e.message || e).slice(0, 160));
+      }
+    }
     await new Promise(r => setTimeout(r, 800));
   }
   return false;
