@@ -16,9 +16,9 @@
  */
 (function () {
   'use strict';
-  if (window.__ETA_EPOCH === 2) return;                     // this version is already active
-  if (window.__ETA_EPOCH && window.__ETA_EPOCH > 2) return;  // a newer version is active
-  window.__ETA_EPOCH = 2;
+  var MY_EPOCH = Date.now();
+  if (window.__ETA_EPOCH && window.__ETA_EPOCH > MY_EPOCH) return; // a newer injection is active
+  window.__ETA_EPOCH = MY_EPOCH;
 
   var API = 'https://api-portal.invoicing.eta.gov.eg/api/v1/';
   var M = window.__ETA_MAP;
@@ -29,7 +29,7 @@
   }
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
-    if (window.__ETA_EPOCH !== 2) return; // superseded instance - stay inert
+    if (window.__ETA_EPOCH !== MY_EPOCH) return; // superseded instance - stay inert
     var m = ev.data;
     if (!m || m.__eta !== 2) return;
     try { handleCommand(m); } catch (e) { send('ERROR', { message: (e && e.message) || String(e), fatal: true }); }
@@ -668,7 +668,14 @@
     if (opt.codeType && opt.codeType !== 'All') {
       var tres = await fetchJson(API + 'codetypes/taxes', auth);
       if (tres.ok && tres.json) {
-        var list = tres.json.taxTypes || (tres.json.result && tres.json.result.taxTypes) || [];
+        var jt = tres.json;
+        var list = jt.taxTypes || (jt.result && jt.result.taxTypes) || [];
+        if (!list.length && jt.EGS) {
+          Object.keys(jt).forEach(function (k) {
+            var o = jt[k];
+            if (o && typeof o === 'object' && (o.id || o.codeTypeID)) list.push({ codeTypeNamePrimaryLang: k, id: o.id || o.codeTypeID });
+          });
+        }
         var wanted = String(opt.codeType).toUpperCase();
         for (var i = 0; i < list.length; i++) {
           var tt = list[i] || {};

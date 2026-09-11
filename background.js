@@ -226,17 +226,24 @@ async function handlePopup(msg) {
       await saveMeta();
       broadcast();
       try {
+        ev('LOG', 'Looking for the portal tab...');
         let tab = await findPortalTab();
-        if (!tab) tab = await chrome.tabs.create({ url: PORTAL_URL, active: true });
-        const ready = await waitRelayReady(tab.id, 60000);
-        if (!ready) throw new Error('Portal page did not respond — is it fully loaded and are you logged in?');
+        if (!tab) { ev('LOG', 'No portal tab found - opening the portal...'); tab = await chrome.tabs.create({ url: PORTAL_URL, active: true }); }
+        ev('LOG', 'Waiting for the portal page to respond (max 25 s)...');
+        const okRelay = await ensureRelay(tab.id, gen, 25000);
+        if (gen !== runGen) return { ok: true, note: 'superseded' };
+        if (!okRelay) throw new Error('Portal page did not respond. Open https://invoicing.eta.gov.eg/documents, refresh it (F5), make sure it loads fully, then press Start again.');
+        ev('LOG', 'Portal page ready - starting the crawl.');
         await chrome.tabs.sendMessage(tab.id, { __etaToPage: 1, type: 'START_CRAWL', data: opts });
+        ev('LOG', 'Crawl command sent.');
         return { ok: true };
       } catch (e) {
-        run.running = false;
-        run.lastError = String(e && e.message || e);
-        await saveMeta(); broadcast();
-        return { ok: false, error: run.lastError };
+        if (gen === runGen) {
+          run.running = false;
+          run.lastError = String(e && e.message || e);
+          await saveMeta(); broadcast();
+        }
+        return { ok: false, error: String(e && e.message || e) };
       }
     }
     case 'RESUME': {
@@ -252,18 +259,24 @@ async function handlePopup(msg) {
       run.stats.docs = 0; run.stats.items = 0; run.stats.errors = 0;
       await saveMeta(); broadcast();
       try {
+        ev('LOG', 'Looking for the portal tab...');
         let tab = await findPortalTab();
-        if (!tab) tab = await chrome.tabs.create({ url: PORTAL_URL, active: true });
-        const ready = await waitRelayReady(tab.id, 60000);
-        if (!ready) throw new Error('Portal page did not respond — is it fully loaded and are you logged in?');
-        const startOpts = Object.assign({}, opts, { skipUuids: [...seenSet] });
+        if (!tab) { ev('LOG', 'No portal tab found - opening the portal...'); tab = await chrome.tabs.create({ url: PORTAL_URL, active: true }); }
+        ev('LOG', 'Waiting for the portal page to respond (max 25 s)...');
+        const okRelay = await ensureRelay(tab.id, gen, 25000);
+        if (gen !== runGen) return { ok: true, note: 'superseded' };
+        if (!okRelay) throw new Error('Portal page did not respond. Open https://invoicing.eta.gov.eg/documents, refresh it (F5), then press Resume again.');
+        ev('LOG', 'Portal page ready - resuming the crawl.');
         await chrome.tabs.sendMessage(tab.id, { __etaToPage: 1, type: 'START_CRAWL', data: startOpts });
+        ev('LOG', 'Crawl command sent.');
         return { ok: true };
       } catch (e) {
-        run.running = false;
-        run.lastError = String(e && e.message || e);
-        await saveMeta(); broadcast();
-        return { ok: false, error: run.lastError };
+        if (gen === runGen) {
+          run.running = false;
+          run.lastError = String(e && e.message || e);
+          await saveMeta(); broadcast();
+        }
+        return { ok: false, error: String(e && e.message || e) };
       }
     }
     case 'PAUSE':
@@ -273,7 +286,7 @@ async function handlePopup(msg) {
       const type = map[msg.type];
       if (type === 'PAUSE') run.paused = true;
       if (type === 'RESUME_CMD') run.paused = false;
-      if (type === 'CANCEL') { run.paused = false; }
+      if (type === 'CANCEL') { run.paused = false; runGen++; } // abort any in-flight startup
       const tab = await findPortalTab();
       if (tab) { try { await chrome.tabs.sendMessage(tab.id, { __etaToPage: 1, type }); } catch (e) {} }
       if (type === 'CANCEL') { run.running = false; await saveMeta(); }

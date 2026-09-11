@@ -6,12 +6,13 @@
  */
 (function () {
   'use strict';
-  if (window.__ETA_RELAY_EPOCH === 2) return;
-  window.__ETA_RELAY_EPOCH = 2;
+  var MY_RE = Date.now();
+  if (window.__ETA_RELAY_EPOCH && window.__ETA_RELAY_EPOCH > MY_RE) return; // a newer injection is active
+  window.__ETA_RELAY_EPOCH = MY_RE;
 
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
-    if (window.__ETA_RELAY_EPOCH !== 2) return; // superseded instance - stay inert
+    if (window.__ETA_RELAY_EPOCH !== MY_RE) return; // superseded instance - stay inert
     var m = ev.data;
     if (!m || m.__eta !== 1) return;
     try {
@@ -21,7 +22,7 @@
   });
 
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (window.__ETA_RELAY_EPOCH !== 2) return;
+    if (window.__ETA_RELAY_EPOCH !== MY_RE) return;
     if (!msg) return;
     if (msg.__etaToPage) {
       window.postMessage({ __eta: 2, type: msg.type, data: msg.data }, location.origin);

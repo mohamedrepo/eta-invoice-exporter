@@ -146,12 +146,12 @@ async function buildXlsx(rows, itemRows, base) {
   await downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), base + '.xlsx');
 }
 
-async function buildCodesXlsx(rows, cols, base) {
+async function buildCodesXlsx(rows, cols, sheetName, base) {
   say(`Building codes workbook \u2014 ${rows.length.toLocaleString()} rows\u2026`);
   await sleep(60);
   const wb = new ExcelJS.Workbook();
   wb.creator = 'ETA eInvoicing Exporter';
-  const ws = wb.addWorksheet((meta && meta.headers && meta.headers.sheet) || 'الأكواد المسجلة', {
+  const ws = wb.addWorksheet(sheetName || 'الأكواد المسجلة', {
     views: [{ rightToLeft: true, state: 'frozen', ySplit: 1, topLeftCell: 'A2' }]
   });
   ws.getRow(1).values = cols;
@@ -196,11 +196,13 @@ async function buildCsv(rows, itemRows, base) {
     const opts = all.eta_opts || {};
     const meta = all.eta_meta || {};
     if ((opts.mode || 'documents') === 'codes') {
+      const t0c = Date.now();
       const cols = (meta.headers && meta.headers.cols) || [];
+      const sheetName = (meta.headers && meta.headers.sheet) || 'الأكواد المسجلة';
       const base = 'ETA_Codes_' + new Date().toISOString().slice(0, 10);
       if (kind === 'csv') await buildCodesCsv(rows, cols, base);
-      else await buildCodesXlsx(rows, cols, base);
-      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      else await buildCodesXlsx(rows, cols, sheetName, base);
+      const secs = ((Date.now() - t0c) / 1000).toFixed(1);
       say(`\u2714 File downloaded.\n\nRows: ${rows.length.toLocaleString()}\nTime: ${secs}s`);
       msgEl.className = 'done';
       return;
