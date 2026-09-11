@@ -3,11 +3,18 @@
 
 const $ = (id) => document.getElementById(id);
 const DEFAULTS = {
+  mode: 'documents',
   from: '2025-07-01', to: new Date().toISOString().slice(0, 10),
   dateField: 'Submission', direction: 'Both', status: 'All', docType: 'All',
-  rin: '', rinRole: 'any',
+  rin: '', rinRole: 'any', codeType: 'All', codeSearch: '',
   pageSize: 100, concurrency: 6, windowDays: 30, maxDocs: 0, includeDetails: true
 };
+
+function applyModeVisibility(mode) {
+  const codes = mode === 'codes';
+  document.querySelectorAll('.docOnly').forEach(el => el.style.display = codes ? 'none' : '');
+  document.querySelectorAll('.codeOnly').forEach(el => el.style.display = codes ? '' : 'none');
+}
 
 // save form edits as they change (debounced) so nothing reverts and nothing is lost
 let optsAppliedOnce = false;
@@ -27,6 +34,7 @@ function fmtNum(n) { return (typeof n === 'number' ? n : 0).toLocaleString('en-U
 
 function readOpts() {
   return {
+    mode: $('mode').value,
     from: $('from').value || DEFAULTS.from,
     to: $('to').value || DEFAULTS.to,
     dateField: $('dateField').value,
@@ -35,6 +43,8 @@ function readOpts() {
     docType: $('docType').value,
     rin: ($('rin').value || '').replace(/\D+/g, ''),
     rinRole: $('rinRole').value,
+    codeType: $('codeType').value,
+    codeSearch: ($('codeSearch').value || '').trim(),
     pageSize: Math.max(10, Math.min(100, parseInt($('pageSize').value, 10) || 100)),
     concurrency: Math.max(1, Math.min(12, parseInt($('concurrency').value, 10) || 6)),
     windowDays: Math.max(1, Math.min(365, parseInt($('windowDays').value, 10) || 30)),
@@ -45,7 +55,8 @@ function readOpts() {
 
 function applyOpts(o) {
   if (!o) return;
-  for (const k of ['from', 'to', 'dateField', 'direction', 'status', 'docType', 'rin', 'rinRole']) if (o[k] != null) $(k).value = o[k];
+  for (const k of ['mode', 'from', 'to', 'dateField', 'direction', 'status', 'docType', 'rin', 'rinRole', 'codeType', 'codeSearch']) if (o[k] != null) $(k).value = o[k];
+  applyModeVisibility($('mode').value);
   for (const k of ['pageSize', 'concurrency', 'windowDays', 'maxDocs']) if (o[k] != null) $(k).value = o[k];
   $('includeDetails').checked = o.includeDetails !== false;
 }
@@ -136,6 +147,10 @@ $('resume').addEventListener('click', async () => {
   const r = await sendPop({ type: 'RESUME', opts: readOpts() });
   if (!r.ok) $('err').textContent = r.error || 'Failed to resume';
   refresh();
+});
+$('mode').addEventListener('change', () => {
+  applyModeVisibility($('mode').value);
+  scheduleOptSave();
 });
 $('pause').addEventListener('click', () => {
   const type = (lastState && lastState.paused) ? 'RESUME_CMD' : 'PAUSE';

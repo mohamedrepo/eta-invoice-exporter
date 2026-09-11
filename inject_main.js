@@ -16,8 +16,9 @@
  */
 (function () {
   'use strict';
-  if (window.__ETA_EXPORTER_INJECTED) return;
-  window.__ETA_EXPORTER_INJECTED = true;
+  if (window.__ETA_EPOCH === 2) return;                     // this version is already active
+  if (window.__ETA_EPOCH && window.__ETA_EPOCH > 2) return;  // a newer version is active
+  window.__ETA_EPOCH = 2;
 
   var API = 'https://api-portal.invoicing.eta.gov.eg/api/v1/';
   var M = window.__ETA_MAP;
@@ -28,6 +29,7 @@
   }
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
+    if (window.__ETA_EPOCH !== 2) return; // superseded instance - stay inert
     var m = ev.data;
     if (!m || m.__eta !== 2) return;
     try { handleCommand(m); } catch (e) { send('ERROR', { message: (e && e.message) || String(e), fatal: true }); }
@@ -410,6 +412,13 @@
     }
     var auth = authHolder.auth;
 
+    if (opt.mode === 'codes') {
+      var cres = await runCodesCrawl(opt, authHolder, cands);
+      ctl.running = false;
+      send('DONE', cres);
+      return;
+    }
+
     var from = new Date(opt.from + 'T00:00:00');
     var to = new Date(opt.to + 'T23:59:59.999');
     var effWindowDays = parseInt(opt.windowDays, 10) || 30;
@@ -635,3 +644,84 @@
     send('DONE', { docs: emitted, scanned: summaries.length, items: itemsCount, elapsedMs: Date.now() - t0, errors: detailErrors, dropped: rinDropped });
   }
 })();
+
+  // ---------- code-usages export (https://invoicing.eta.gov.eg/codeusages) ----------
+  var CODE_LABELS = {
+    codeLookupValue: 'كود الصنف', itemCode: 'كود الصنف', codeName: 'إسم الكود',
+    codeNameSecondaryLang: 'إسم الكود (إنجليزى)', parentCodeName: 'الصنف الأب',
+    parentLevelName: 'مستوى الصنف', activeFrom: 'نشط من', activeTo: 'نشط حتى',
+    active: 'نشط', codeID: 'كود داخلى', codeUsageStatus: 'الحالة', status: 'الحالة',
+    codeTypeID: 'نوع الكود', codeType: 'نوع الكود', requestedByRIN: 'بواسطة (RIN)',
+    requestedByName: 'بواسطة', description: 'الوصف', codeDescription: 'الوصف',
+    ownerTaxpayerRIN: 'RIN المالك', ownerTaxpayerName: 'إسم المالك'
+  };
+  function flatVal(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') { try { return JSON.stringify(v); } catch (e) { return String(v); } }
+    return v;
+  }
+
+  async function runCodesCrawl(opt, authHolder, cands) {
+    var t0 = Date.now();
+    var auth = authHolder.auth;
+    var codeTypeParam = '';
+    if (opt.codeType && opt.codeType !== 'All') {
+      var tres = await fetchJson(API + 'codetypes/taxes', auth);
+      if (tres.ok && tres.json) {
+        var list = tres.json.taxTypes || (tres.json.result && tres.json.result.taxTypes) || [];
+        var wanted = String(opt.codeType).toUpperCase();
+        for (var i = 0; i < list.length; i++) {
+          var tt = list[i] || {};
+          var nm = String(tt.codeTypeNamePrimaryLang || tt.codeTypeName || tt.name || '').toUpperCase();
+          if (nm === wanted) { codeTypeParam = String(tt.id || tt.codeTypeID || ''); break; }
+        }
+      }
+      if (codeTypeParam) send('LOG', { message: 'Code type ' + opt.codeType + ' resolved (id ' + codeTypeParam + ').' });
+      else send('LOG', { message: 'Code type ' + opt.codeType + ' was not resolved - exporting all code types.' });
+    }
+    var rowKeys = null, page = 1, totalPages = 1, empty = false, total = 0;
+    var acc = [];
+    while (page <= totalPages && !empty) {
+      await waitGate();
+      var p = new URLSearchParams();
+      p.set('Ps', String(opt.pageSize || 100));
+      p.set('Pn', String(page));
+      if (codeTypeParam) p.set('CodeTypeID', codeTypeParam);
+      var s = String(opt.codeSearch || '').trim();
+      if (s) {
+        if (/^(EG|GS)-/i.test(s) || /^\d+$/.test(s)) p.set('ItemCode', s); else p.set('CodeName', s);
+      }
+      var res = await fetchJson(API + 'codetypes/codes/my?' + p.toString(), auth);
+      if (res.status === 401 || res.status === 403) {
+        authHolder.auth = await reauth(cands);
+        if (!authHolder.auth) throw new Error('SESSION_EXPIRED');
+        auth = authHolder.auth;
+        res = await fetchJson(API + 'codetypes/codes/my?' + p.toString(), auth);
+      }
+      if (!res.ok) throw new Error('CODES_HTTP_' + res.status + ': ' + String(res.text || '').slice(0, 160));
+      var j = res.json || {};
+      var rowsArr = j.result || j.documents || (Array.isArray(j) ? j : []);
+      var md = j.metadata || {};
+      if (md.totalPages) totalPages = md.totalPages;
+      else if (md.totalCount) totalPages = Math.max(1, Math.ceil((md.totalCount | 0) / (parseInt(opt.pageSize, 10) || 100)));
+      if (!rowsArr.length) { empty = true; break; }
+      if (!rowKeys) {
+        rowKeys = Object.keys(rowsArr[0]);
+        send('HEADERS', { sheet: 'الأكواد المسجلة', cols: rowKeys.map(function (k) { return CODE_LABELS[k] || k; }) });
+        send('LOG', { message: 'Codes: ' + (md.totalCount | 0) + ' total, fields: ' + rowKeys.slice(0, 14).join(', ') });
+      }
+      for (var ri = 0; ri < rowsArr.length; ri++) {
+        var o = rowsArr[ri];
+        var arr = [];
+        for (var kk = 0; kk < rowKeys.length; kk++) arr.push(flatVal(o[rowKeys[kk]]));
+        acc.push(arr);
+        total++;
+        if (acc.length >= 200) { send('BATCH', { rows: acc, itemRows: [], keys: [] }); acc = []; }
+      }
+      send('PROGRESS', { phase: 'codes', page: page, pages: totalPages, listed: total });
+      if (opt.maxDocs && total >= opt.maxDocs) break;
+      page++;
+    }
+    if (acc.length) send('BATCH', { rows: acc, itemRows: [], keys: [] });
+    return { docs: total, scanned: total, items: 0, elapsedMs: Date.now() - t0 };
+  }

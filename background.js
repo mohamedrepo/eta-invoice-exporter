@@ -96,7 +96,7 @@ function snapshot() {
     progress: run.progress, stats: run.stats, lastError: run.lastError,
     startedAt: run.startedAt, finishedAt: run.finishedAt,
     chunkIdx, pendingRows: pending.rows.length,
-    auth: !!authCache, pong: run.pong
+    auth: !!authCache, pong: run.pong, headers: run.headers || null
   };
 }
 
@@ -215,6 +215,7 @@ async function handlePopup(msg) {
       return { ok: true, state: snapshot(), opts: (await getStorage(KEY_OPTS)) || null };
     case 'START': {
       if (run.running) return { ok: false, error: 'ALREADY_RUNNING' };
+      const gen = ++runGen;
       await clearData();
       seenSet = new Set();
       const opts = msg.opts || {};
@@ -240,6 +241,7 @@ async function handlePopup(msg) {
     }
     case 'RESUME': {
       if (run.running) return { ok: false, error: 'ALREADY_RUNNING' };
+      const gen = ++runGen;
       seenSet = await loadSeen();
       const opts = msg.opts || (await getStorage(KEY_OPTS)) || {};
       await chrome.storage.local.set({ [KEY_OPTS]: opts });

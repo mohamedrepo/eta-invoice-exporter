@@ -146,6 +146,36 @@ async function buildXlsx(rows, itemRows, base) {
   await downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), base + '.xlsx');
 }
 
+async function buildCodesXlsx(rows, cols, base) {
+  say(`Building codes workbook \u2014 ${rows.length.toLocaleString()} rows\u2026`);
+  await sleep(60);
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'ETA eInvoicing Exporter';
+  const ws = wb.addWorksheet((meta && meta.headers && meta.headers.sheet) || 'الأكواد المسجلة', {
+    views: [{ rightToLeft: true, state: 'frozen', ySplit: 1, topLeftCell: 'A2' }]
+  });
+  ws.getRow(1).values = cols;
+  for (let c = 1; c <= cols.length; c++) {
+    ws.getColumn(c).width = Math.max(12, Math.min(40, String(cols[c - 1]).length + 8));
+    ws.getColumn(c).style = { font: FONT };
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const row = ws.addRow(cleanRow(rows[i]));
+    for (let c = 1; c <= cols.length; c++) row.getCell(c).font = FONT;
+    if (i % 400 === 0) { say(`Rows: ${i.toLocaleString()}/${rows.length.toLocaleString()}\u2026`); await sleep(0); }
+  }
+  if (rows.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: rows.length + 1, column: cols.length } };
+  say('Writing .xlsx\u2026');
+  await sleep(60);
+  const buf = await wb.xlsx.writeBuffer();
+  await downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), base + '_codes.xlsx');
+}
+
+async function buildCodesCsv(rows, cols, base) {
+  const c1 = new Blob(['\uFEFF' + toCsv(cols, rows)], { type: 'text/csv;charset=utf-8' });
+  await downloadBlob(c1, base + '_codes.csv');
+}
+
 async function buildCsv(rows, itemRows, base) {
   say(`Building CSVs — ${rows.length.toLocaleString()} invoices, ${itemRows.length.toLocaleString()} line items…`);
   await sleep(60);
@@ -164,6 +194,17 @@ async function buildCsv(rows, itemRows, base) {
     const itemRows = concatChunks(all, 'eta_items_c');
     if (!rows.length) { say('No data collected yet.\nRun an export from the extension popup first.'); return; }
     const opts = all.eta_opts || {};
+    const meta = all.eta_meta || {};
+    if ((opts.mode || 'documents') === 'codes') {
+      const cols = (meta.headers && meta.headers.cols) || [];
+      const base = 'ETA_Codes_' + new Date().toISOString().slice(0, 10);
+      if (kind === 'csv') await buildCodesCsv(rows, cols, base);
+      else await buildCodesXlsx(rows, cols, base);
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      say(`\u2714 File downloaded.\n\nRows: ${rows.length.toLocaleString()}\nTime: ${secs}s`);
+      msgEl.className = 'done';
+      return;
+    }
     const base = 'eInvoices_' + (opts.from || 'range') + '_' + (opts.to || '');
     const t0 = Date.now();
     if (kind === 'csv') await buildCsv(rows, itemRows, base);

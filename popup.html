@@ -50,28 +50,34 @@
       <span><span class="dot" id="dotData"></span>Data collected</span>
     </div>
     <div class="grid">
-      <div><label>From (submission date)</label><input type="date" id="from" /></div>
-      <div><label>To</label><input type="date" id="to" /></div>
-      <div><label>Date field</label>
+      <div class="wide"><label>Export type</label>
+        <select id="mode">
+          <option value="documents" selected>الفواتير — Documents (invoices + line items)</option>
+          <option value="codes">الأكواد — Code usages (item codes from /codeusages)</option>
+        </select>
+      </div>
+      <div class="docOnly"><label>From (submission date)</label><input type="date" id="from" /></div>
+      <div class="docOnly"><label>To</label><input type="date" id="to" /></div>
+      <div class="docOnly"><label>Date field</label>
         <select id="dateField">
           <option value="Submission">Submission (تاريخ التقديم)</option>
           <option value="Issue">Issue (تاريخ الإصدار)</option>
         </select>
       </div>
-      <div><label>Direction</label>
+      <div class="docOnly"><label>Direction</label>
         <select id="direction">
           <option value="Both" selected>Both (الكل)</option>
           <option value="Received">Received (وارد)</option>
           <option value="Sent">Sent (صادر)</option>
         </select>
       </div>
-      <div><label>Status</label>
+      <div class="docOnly"><label>Status</label>
         <select id="status">
           <option>All</option><option>Valid</option><option>Invalid</option>
           <option>Rejected</option><option>Cancelled</option><option>Submitted</option>
         </select>
       </div>
-      <div><label>Document type</label>
+      <div class="docOnly"><label>Document type</label>
         <select id="docType">
           <option value="All">All</option>
           <option value="i">فاتورة (invoice)</option>
@@ -79,19 +85,27 @@
           <option value="d">إشعار مدين (debit)</option>
         </select>
       </div>
-      <div><label>Page size</label><input type="number" id="pageSize" value="100" min="10" max="100" /></div>
-      <div><label>Detail workers</label><input type="number" id="concurrency" value="6" min="1" max="12" /></div>
-      <div><label>Date window (days)</label><input type="number" id="windowDays" value="30" min="1" max="365" /></div>
-      <div><label>Max documents (0 = all)</label><input type="number" id="maxDocs" value="0" min="0" /></div>
-      <div><label>Registration number (الرقم الضريبي)</label><input type="text" id="rin" placeholder="e.g. 756158761" inputmode="numeric" /></div>
-      <div><label>Number is</label>
+      <div class="docOnly"><label>Registration number (الرقم الضريبي)</label><input type="text" id="rin" placeholder="e.g. 756158761" inputmode="numeric" /></div>
+      <div class="docOnly"><label>Number is</label>
         <select id="rinRole">
           <option value="any">Any side — sender or receiver</option>
           <option value="issuer">Sender / issuer only (بائع)</option>
           <option value="receiver">Receiver only (مشتري)</option>
         </select>
       </div>
-      <div class="wide"><label><input type="checkbox" id="includeDetails" checked style="width:auto" /> Fetch full details per invoice (line items, taxes, addresses — needed for both sheets)</label></div>
+      <div class="codeOnly" style="display:none"><label>Code type</label>
+        <select id="codeType">
+          <option value="All">All types (كل الأنواع)</option>
+          <option value="EGS">EGS — item codes (أكواد الأصناف)</option>
+          <option value="GS1">GS1 — global codes</option>
+        </select>
+      </div>
+      <div class="codeOnly" style="display:none"><label>Search (code or name — optional)</label><input type="text" id="codeSearch" placeholder="e.g. EG-... or ورق" /></div>
+      <div class="wide docOnly"><label><input type="checkbox" id="includeDetails" checked style="width:auto" /> Fetch full details per invoice (line items, taxes, addresses — needed for both sheets)</label></div>
+      <div><label>Page size</label><input type="number" id="pageSize" value="100" min="10" max="100" /></div>
+      <div class="docOnly"><label>Detail workers</label><input type="number" id="concurrency" value="6" min="1" max="12" /></div>
+      <div class="docOnly"><label>Date window (days)</label><input type="number" id="windowDays" value="30" min="1" max="365" /></div>
+      <div><label>Max rows (0 = all)</label><input type="number" id="maxDocs" value="0" min="0" /></div>
     </div>
     <div class="btns">
       <button id="start">Start export</button>

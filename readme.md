@@ -27,7 +27,14 @@ Requirements: Chrome 111+ (Edge also works via `edge://extensions`).
    existing session - it never sees or stores your password).
 2. Click the extension icon. Check the three indicators: **Portal tab**, **Auth token**,
    **Data collected**. Press **Check connection** to verify.
-3. Choose filters:
+3. **Choose the export type** at the top of the popup:
+   - **الفواتير — Documents**: invoices + line items (everything below applies).
+   - **الأكواد — Code usages**: your registered item codes from
+     <https://invoicing.eta.gov.eg/codeusages> via `codetypes/codes/my` — optional code-type
+     filter (EGS/GS1) and a code/name search; exports a single-sheet XLSX/CSV with all fields
+     the portal returns. Document filters (dates/direction/status/RIN) are hidden in this mode.
+4. Then choose filters (Documents mode only):
+
    - **From / To** - date range (30-day windows are used internally, matching API limits)
    - **Date field** - filter by submission date (تاريخ التقديم) or issue date (تاريخ الإصدار)
    - **Direction** - Both (default) / Received (وارد) / Sent (صادر)
